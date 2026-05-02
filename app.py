@@ -167,17 +167,29 @@ with tab1:
 # ANALYSIS
 # ===============================
 with tab2:
-    uploaded = st.file_uploader("Upload Image")
+    st.markdown("## 🔍 Analysis Dashboard")
 
+    uploaded = st.file_uploader("📤 Upload Millet Leaf Image", type=["jpg","png","jpeg"])
+
+    # 🌡 Environmental Inputs
     col1, col2, col3 = st.columns(3)
-    temp = col1.slider("Temperature", 10,50,25)
-    humidity = col2.slider("Humidity",10,100,50)
-    soil = col3.slider("Soil Moisture",10,100,50)
+    temp = col1.slider("🌡 Temperature (°C)", 10,50,25)
+    humidity = col2.slider("💧 Humidity (%)",10,100,50)
+    soil = col3.slider("🌱 Soil Moisture (%)",10,100,50)
 
     if uploaded:
         img = Image.open(uploaded)
-        st.image(img, width=250)
 
+        # 👇 Layout split
+        left, right = st.columns([1,2])
+
+        with left:
+            st.image(img, caption="Uploaded Image", use_column_width=True)
+
+            if st.button("🔥 Show Heatmap"):
+                st.image(generate_heatmap(img), caption="Model Focus Area")
+
+        # Prediction
         pred = model.predict(preprocess(img))
         idx = np.argmax(pred)
         confidence = float(np.max(pred))
@@ -194,44 +206,121 @@ with tab2:
         else:
             level = "Low"
 
-        # Metrics
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Disease", disease)
-        col2.metric("Confidence", f"{confidence*100:.2f}%")
-        col3.metric("Severity", level)
+        # ===============================
+        # 📊 METRICS
+        # ===============================
+        st.markdown("### 📊 Key Metrics")
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("🌱 Disease", disease)
+        m2.metric("📊 Confidence", f"{confidence*100:.2f}%")
+        m3.metric("⚠ Severity", level)
 
         st.progress(int(severity_index))
 
-        st.session_state.history.append((disease, confidence))
+        # ===============================
+        # 📊 CHARTS (FIXED SIZE)
+        # ===============================
+        st.markdown("### 📊 Prediction Insights")
 
-        # Charts
-        st.plotly_chart(px.bar(x=clean_names, y=pred[0]))
-        top = np.argsort(pred[0])[-3:]
-        st.plotly_chart(px.pie(values=pred[0][top], names=[clean_names[i] for i in top]))
+        c1, c2 = st.columns(2)
 
-        # Heatmap
-        if st.button("🔥 Show Heatmap"):
-            st.image(generate_heatmap(img))
+        with c1:
+            fig = px.bar(
+                x=clean_names,
+                y=pred[0],
+                height=300
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        with c2:
+            top = np.argsort(pred[0])[-3:]
+            fig2 = px.pie(
+                values=pred[0][top],
+                names=[clean_names[i] for i in top],
+                height=300
+            )
+            st.plotly_chart(fig2, use_container_width=True)
 
         # ===============================
-        # 🧠 EXPLANATION + FERTILIZER
+        # 🧠 DIAGNOSIS PANEL (FIXED)
         # ===============================
         st.markdown("### 🧠 Diagnosis & Recommendation")
 
         if disease in disease_info:
             info = disease_info[disease]
 
-            st.success(f"Disease: {disease}")
-            st.write(f"📌 Description: {info['desc']}")
-            st.write(f"⚠ Cause: {info['cause']}")
-            st.write(f"💊 Treatment: {info['treatment']}")
-            st.write(f"🌾 Fertilizer Recommendation: {info['fertilizer']}")
+            st.success(f"🌱 Disease Detected: {disease}")
 
-# ===============================
-# REPORT
-# ===============================
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.write(f"📌 **Description:** {info['desc']}")
+                st.write(f"⚠ **Cause:** {info['cause']}")
+
+            with col2:
+                st.write(f"💊 **Treatment:** {info['treatment']}")
+                st.write(f"🌾 **Fertilizer:** {info['fertilizer']}")
+
+        else:
+            st.warning("No data available")
 with tab3:
-    st.subheader("Prediction History")
+    st.markdown("## 📄 Smart Report Dashboard")
 
-    for h in st.session_state.history:
-        st.write(h)
+    if st.session_state.history:
+
+        # ===============================
+        # 🧠 LAST PREDICTION SUMMARY
+        # ===============================
+        last_disease, last_conf = st.session_state.history[-1]
+
+        st.markdown("### 🧠 Latest Diagnosis")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.metric("🌱 Disease", last_disease)
+            st.metric("📊 Confidence", f"{last_conf*100:.2f}%")
+
+        # ===============================
+        # 🌾 RECOMMENDATION PANEL
+        # ===============================
+        if last_disease in disease_info:
+            info = disease_info[last_disease]
+
+            st.markdown("### 🌿 Recommendation")
+
+            st.success(f"Detected: {last_disease}")
+
+            st.write(f"📌 **Description:** {info['desc']}")
+            st.write(f"⚠ **Cause:** {info['cause']}")
+            st.write(f"💊 **Treatment:** {info['treatment']}")
+            st.write(f"🌾 **Fertilizer:** {info['fertilizer']}")
+
+        # ===============================
+        # 📊 HISTORY CHART
+        # ===============================
+        st.markdown("### 📊 Prediction History")
+
+        diseases = [h[0] for h in st.session_state.history]
+        confidences = [h[1]*100 for h in st.session_state.history]
+
+        fig = px.line(
+            x=list(range(len(diseases))),
+            y=confidences,
+            markers=True,
+            title="Confidence Over Time"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # ===============================
+        # 📋 HISTORY TABLE
+        # ===============================
+        st.markdown("### 📋 Detailed History")
+
+        for i, h in enumerate(st.session_state.history):
+            st.write(f"{i+1}. {h[0]} — {h[1]*100:.2f}%")
+
+    else:
+        st.info("No predictions yet. Go to Analysis tab.")
