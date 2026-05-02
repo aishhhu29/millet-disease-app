@@ -42,9 +42,7 @@ if not st.session_state.logged_in:
 # ===============================
 st.markdown("""
 <style>
-body {
-    background-color: #0f172a;
-}
+body {background-color:#0f172a;}
 .main-title {
     text-align:center;
     font-size:40px;
@@ -53,7 +51,7 @@ body {
     margin-bottom:20px;
 }
 .card {
-    background: #111827;
+    background:#111827;
     padding:20px;
     border-radius:15px;
     border:1px solid #2d3748;
@@ -69,28 +67,28 @@ st.markdown("<div class='main-title'>🌿 Digital Twin Millet System</div>", uns
 # ===============================
 disease_info = {
     "finger_smut": {
-        "desc": "Fungal disease causing smut balls.",
-        "cause": "Humidity and infected seeds.",
-        "treatment": "Apply Carbendazim fungicide.",
-        "fertilizer": "Balanced NPK fertilizer."
+        "desc": "Fungal disease forming smut balls that reduce grain quality.",
+        "cause": "High humidity and infected seeds.",
+        "treatment": "Apply Carbendazim and use certified seeds.",
+        "fertilizer": "Balanced NPK improves plant resistance."
     },
     "finger_wilt": {
-        "desc": "Wilting due to fungal infection.",
-        "cause": "Soil pathogens.",
-        "treatment": "Use Trichoderma.",
-        "fertilizer": "Organic compost."
+        "desc": "Wilting due to soil-borne fungal infection affecting roots.",
+        "cause": "Poor drainage and infected soil.",
+        "treatment": "Apply Trichoderma bio-control.",
+        "fertilizer": "Organic compost improves soil health."
     },
     "pearl_downy": {
-        "desc": "Downy mildew disease.",
-        "cause": "Cool humid conditions.",
-        "treatment": "Apply Metalaxyl.",
-        "fertilizer": "Potassium-rich fertilizer."
+        "desc": "Downy mildew affecting leaf growth and productivity.",
+        "cause": "Cool humid environment.",
+        "treatment": "Use Metalaxyl fungicide.",
+        "fertilizer": "Potassium boosts plant immunity."
     },
     "pearl_seedling": {
-        "desc": "Seedling disease.",
-        "cause": "Soil pathogens.",
-        "treatment": "Seed treatment.",
-        "fertilizer": "Phosphorus-rich fertilizer."
+        "desc": "Early-stage disease affecting seedling development.",
+        "cause": "Soil pathogens and poor seed quality.",
+        "treatment": "Seed treatment with fungicide.",
+        "fertilizer": "Phosphorus enhances root development."
     }
 }
 
@@ -100,7 +98,7 @@ disease_info = {
 class_names = np.load("class_names.npy", allow_pickle=True)
 
 # ===============================
-# MODEL (FIXED)
+# MODEL LOADING (STABLE)
 # ===============================
 @st.cache_resource
 def load_model():
@@ -108,11 +106,7 @@ def load_model():
     try:
         return load_model("fixed_model.h5", compile=False)
     except:
-        base = tf.keras.applications.MobileNetV2(
-            weights=None,
-            include_top=False,
-            input_shape=(224,224,3)
-        )
+        base = tf.keras.applications.MobileNetV2(weights=None, include_top=False, input_shape=(224,224,3))
         x = tf.keras.layers.GlobalAveragePooling2D()(base.output)
         x = tf.keras.layers.Dense(128, activation="relu")(x)
         out = tf.keras.layers.Dense(len(class_names), activation="softmax")(x)
@@ -160,26 +154,26 @@ def generate_heatmap(img):
     heatmap = tf.squeeze(heatmap)
 
     heatmap = heatmap.numpy()
-    heatmap = np.maximum(heatmap, 0) / (np.max(heatmap) + 1e-8)
+    heatmap = np.maximum(heatmap, 0) / (np.max(heatmap)+1e-8)
     heatmap = cv2.resize(heatmap, (224,224))
 
     img_np = np.array(img.resize((224,224)))
-    heatmap = np.uint8(255 * heatmap)
+    heatmap = np.uint8(255*heatmap)
     heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
 
     overlay = heatmap*0.4 + img_np
-    return np.clip(overlay, 0, 255).astype(np.uint8)
+    return np.clip(overlay,0,255).astype(np.uint8)
 
 # ===============================
 # TABS
 # ===============================
-tab1, tab2, tab3 = st.tabs(["🏠 Home", "📊 Analysis", "📄 Report"])
+tab1, tab2, tab3 = st.tabs(["🏠 Home","📊 Analysis","📄 Report"])
 
 # ===============================
 # HOME
 # ===============================
 with tab1:
-    st.write("🌾 Digital Twin system for millet disease detection and crop management.")
+    st.write("🌾 Smart system for millet disease detection and crop management.")
 
 # ===============================
 # ANALYSIS
@@ -190,7 +184,7 @@ with tab2:
     uploaded = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
 
     col1, col2, col3 = st.columns(3)
-    temp = col1.slider("🌡 Temperature", 10,50,25)
+    temp = col1.slider("🌡 Temperature",10,50,25)
     humidity = col2.slider("💧 Humidity",10,100,50)
     soil = col3.slider("🌱 Soil Moisture",10,100,50)
 
@@ -203,7 +197,7 @@ with tab2:
             st.image(img, use_container_width=True)
             if st.button("🔥 Show Heatmap"):
                 st.image(generate_heatmap(img))
-                st.info("Highlighted regions show infected areas.")
+                st.info("Model highlights infected regions.")
 
         pred = model.predict(preprocess(img))
         idx = np.argmax(pred)
@@ -222,6 +216,25 @@ with tab2:
             </div>
             """, unsafe_allow_html=True)
 
+            # Charts
+            st.markdown("### 📊 Model Insights")
+
+            fig1 = px.bar(
+                x=[c.replace("_"," ").title() for c in class_names],
+                y=pred[0],
+                title="Prediction Confidence"
+            )
+            st.plotly_chart(fig1, use_container_width=True)
+
+            top = np.argsort(pred[0])[-3:]
+            fig2 = px.pie(
+                values=pred[0][top],
+                names=[class_names[i].replace("_"," ").title() for i in top],
+                title="Top Predictions"
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+            # Explanation
             st.markdown("### 🧠 Diagnosis & Recommendation")
 
             if disease in disease_info:
@@ -229,10 +242,10 @@ with tab2:
 
                 st.markdown(f"""
                 <div class="card">
-                    <p><b>📌 Description:</b> {info['desc']}</p>
-                    <p><b>⚠ Cause:</b> {info['cause']}</p>
-                    <p><b>💊 Treatment:</b> {info['treatment']}</p>
-                    <p><b>🌾 Fertilizer:</b> {info['fertilizer']}</p>
+                <p><b>📌 Description:</b> {info['desc']}</p>
+                <p><b>⚠ Cause:</b> {info['cause']}</p>
+                <p><b>💊 Treatment:</b> {info['treatment']}</p>
+                <p><b>🌾 Fertilizer:</b> {info['fertilizer']}</p>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -245,13 +258,13 @@ with tab3:
     if st.session_state.history:
         d,c = st.session_state.history[-1]
 
-        st.metric("🌱 Last Disease", d)
+        st.metric("🌱 Disease", d)
         st.metric("📊 Confidence", f"{c*100:.2f}%")
 
         diseases = [h[0] for h in st.session_state.history]
-        confidences = [h[1]*100 for h in st.session_state.history]
+        conf = [h[1]*100 for h in st.session_state.history]
 
-        st.plotly_chart(px.line(x=list(range(len(diseases))), y=confidences, markers=True),
+        st.plotly_chart(px.line(x=list(range(len(diseases))), y=conf, markers=True),
                         use_container_width=True)
 
         st.markdown("### 📋 History")
@@ -260,11 +273,3 @@ with tab3:
 
     else:
         st.info("No predictions yet.")
-
-# ===============================
-# SIDEBAR
-# ===============================
-if st.session_state.role == "admin":
-    st.sidebar.success("Admin Mode")
-else:
-    st.sidebar.info("User Mode")
