@@ -215,24 +215,71 @@ with tab2:
                 <h3 style="color:#4fc3f7;">📊 {confidence*100:.2f}%</h3>
             </div>
             """, unsafe_allow_html=True)
+# ===============================
+# 📊 MODEL INSIGHTS (PRO VERSION)
+# ===============================
 
-            # Charts
-            st.markdown("### 📊 Model Insights")
+st.markdown("## 📊 Model Insights")
 
-            fig1 = px.bar(
-                x=[c.replace("_"," ").title() for c in class_names],
-                y=pred[0],
-                title="Prediction Confidence"
-            )
-            st.plotly_chart(fig1, use_container_width=True)
+labels = [c.replace("_"," ").title() for c in class_names]
+values = pred[0]
 
-            top = np.argsort(pred[0])[-3:]
-            fig2 = px.pie(
-                values=pred[0][top],
-                names=[class_names[i].replace("_"," ").title() for i in top],
-                title="Top Predictions"
-            )
-            st.plotly_chart(fig2, use_container_width=True)
+# 🔹 BAR CHART (IMPROVED)
+fig1 = px.bar(
+    x=labels,
+    y=values,
+    text=[f"{v*100:.1f}%" for v in values],
+    color=values,
+    color_continuous_scale="greens",
+)
+
+fig1.update_layout(
+    xaxis_title="Disease Classes",
+    yaxis_title="Prediction Probability",
+    plot_bgcolor="#0f172a",
+    paper_bgcolor="#0f172a",
+    font=dict(color="white"),
+)
+
+st.plotly_chart(fig1, use_container_width=True)
+
+
+# 🔹 PIE CHART (CLEAN)
+top = np.argsort(values)[-3:]
+
+fig2 = px.pie(
+    values=values[top],
+    names=[labels[i] for i in top],
+    hole=0.5
+)
+
+fig2.update_layout(
+    paper_bgcolor="#0f172a",
+    font=dict(color="white")
+)
+
+st.plotly_chart(fig2, use_container_width=True)
+
+
+# ===============================
+# 🧠 INSIGHT TEXT (VERY IMPORTANT)
+# ===============================
+top_class = labels[idx]
+top_conf = values[idx] * 100
+
+st.markdown(f"""
+<div class="card">
+
+<h4>🧠 Model Interpretation</h4>
+
+<p>The model strongly predicts <b>{top_class}</b> with a confidence of <b>{top_conf:.2f}%</b>.</p>
+
+<p>This indicates that the visual features in the uploaded leaf closely match the learned patterns of this disease.</p>
+
+<p>The bar chart shows how the model compares all possible diseases, while the pie chart highlights the most probable classes.</p>
+
+</div>
+""", unsafe_allow_html=True)
 
             # Explanation
             st.markdown("### 🧠 Diagnosis & Recommendation")
