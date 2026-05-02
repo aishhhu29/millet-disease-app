@@ -7,7 +7,7 @@ import hashlib
 import cv2
 
 # ===============================
-# 🔐 SECURE LOGIN (HASHED)
+# 🔐 LOGIN SYSTEM
 # ===============================
 def hash_pass(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -38,21 +38,24 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ===============================
-# 🎨 UI STYLE
+# 🎨 STYLE
 # ===============================
 st.markdown("""
 <style>
 .main-title {
     text-align:center;
-    font-size:38px;
+    font-size:36px;
     color:#77dd77;
     font-weight:bold;
 }
 .card {
     background:white;
-    padding:20px;
+    padding:18px;
     border-radius:15px;
     box-shadow:0 4px 10px rgba(0,0,0,0.1);
+}
+@media (max-width:768px){
+    .main-title {font-size:24px;}
 }
 </style>
 """, unsafe_allow_html=True)
@@ -60,13 +63,13 @@ st.markdown("""
 st.markdown("<div class='main-title'>🌿 Digital Twin Millet System</div>", unsafe_allow_html=True)
 
 # ===============================
-# LOAD DATA
+# LOAD CLASS NAMES
 # ===============================
 class_names = np.load("class_names.npy", allow_pickle=True)
 clean_names = [i.replace("_"," ").title() for i in class_names]
 
 # ===============================
-# MODEL LOAD
+# MODEL
 # ===============================
 @st.cache_resource
 def load_model():
@@ -94,9 +97,9 @@ def preprocess(img):
     return tf.keras.applications.mobilenet_v2.preprocess_input(arr)
 
 # ===============================
-# HEATMAP
+# HEATMAP (FIXED)
 # ===============================
-def heatmap(img):
+def generate_heatmap(img):
     img_array = preprocess(img)
 
     last_conv = None
@@ -121,8 +124,9 @@ def heatmap(img):
     heatmap = conv @ pooled[..., tf.newaxis]
     heatmap = tf.squeeze(heatmap)
 
-    heatmap = np.maximum(heatmap, 0) / np.max(heatmap)
-    heatmap = cv2.resize(heatmap.numpy(), (224,224))
+    heatmap = heatmap.numpy() if hasattr(heatmap, "numpy") else heatmap
+    heatmap = np.maximum(heatmap, 0) / (np.max(heatmap) + 1e-8)
+    heatmap = cv2.resize(heatmap, (224,224))
 
     img_np = np.array(img.resize((224,224)))
     heatmap = np.uint8(255*heatmap)
@@ -136,10 +140,30 @@ def heatmap(img):
 tab1, tab2, tab3 = st.tabs(["🏠 Home", "📊 Analysis", "📄 Report"])
 
 # ===============================
+# HOME
+# ===============================
+with tab1:
+    st.markdown("## 🌐 System Overview")
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.markdown("### 🌱 Disease Detection")
+    col1.write("Image-based classification")
+
+    col2.markdown("### 🌡 Environment Simulation")
+    col2.write("Digital Twin modeling")
+
+    col3.markdown("### 📊 Severity Index")
+    col3.write("Prediction + environment")
+
+    st.markdown("---")
+    st.info("👉 Go to Analysis tab to start")
+
+# ===============================
 # ANALYSIS
 # ===============================
 with tab2:
-    uploaded = st.file_uploader("Upload Image")
+    uploaded = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
 
     if uploaded:
         img = Image.open(uploaded)
@@ -150,14 +174,16 @@ with tab2:
         confidence = float(np.max(pred))
         disease = clean_names[idx]
 
-        st.metric("Disease", disease)
-        st.metric("Confidence", f"{confidence*100:.2f}%")
+        # METRICS
+        col1, col2, col3 = st.columns(3)
+        col1.metric("🌱 Disease", disease)
+        col2.metric("📊 Confidence", f"{confidence*100:.2f}%")
+        col3.metric("⚠ Severity", "High" if confidence > 0.7 else "Moderate")
 
-        # SAVE HISTORY
         st.session_state.history.append((disease, confidence))
 
         # BAR CHART
-        st.subheader("📊 Probability Distribution")
+        st.subheader("📊 Probabilities")
         fig = px.bar(x=clean_names, y=pred[0])
         st.plotly_chart(fig)
 
@@ -169,7 +195,7 @@ with tab2:
 
         # HEATMAP
         if st.button("🔥 Show Heatmap"):
-            st.image(heatmap(img))
+            st.image(generate_heatmap(img))
 
 # ===============================
 # REPORT
@@ -179,18 +205,17 @@ with tab3:
 
     if st.session_state.history:
         last = st.session_state.history[-1]
-        st.write(f"Latest Prediction: {last[0]}")
+        st.write(f"Disease: {last[0]}")
         st.write(f"Confidence: {last[1]*100:.2f}%")
-
-        st.info("The system integrates image analysis with environmental modeling.")
 
     st.subheader("📊 History")
     for h in st.session_state.history:
         st.write(h)
 
 # ===============================
-# ADMIN PANEL
+# ADMIN
 # ===============================
 if st.session_state.role == "admin":
     st.sidebar.success("Admin Mode")
-    st.sidebar.write("You can extend controls here")
+else:
+    st.sidebar.info("User Mode")
