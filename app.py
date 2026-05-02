@@ -2,201 +2,155 @@ import streamlit as st
 import tensorflow as tf
 import numpy as np
 from PIL import Image
-import matplotlib.pyplot as plt
+import plotly.express as px
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 
 # ===============================
-# ⚙️ PAGE CONFIG
+# LOGIN SYSTEM
 # ===============================
-st.set_page_config(page_title="Digital Twin Millet System", layout="wide")
-
-# ===============================
-# 🎨 UI STYLE
-# ===============================
-st.markdown("""
-<style>
-.main-title {
-    text-align:center;
-    font-size:40px;
-    color:#00c853;
-    font-weight:bold;
+users = {
+    "admin": {"password": "admin123", "role": "admin"},
+    "user": {"password": "user123", "role": "user"}
 }
-.card {
-    background:#ffffff;
-    padding:20px;
-    border-radius:15px;
-    box-shadow:0px 4px 12px rgba(0,0,0,0.1);
-}
-</style>
-""", unsafe_allow_html=True)
+
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+def login():
+    st.title("🔐 Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        if username in users and users[username]["password"] == password:
+            st.session_state.logged_in = True
+            st.session_state.role = users[username]["role"]
+            st.success("Login successful")
+        else:
+            st.error("Invalid credentials")
+
+if not st.session_state.logged_in:
+    login()
+    st.stop()
 
 # ===============================
-# 🎓 TITLE
+# PAGE CONFIG
 # ===============================
-st.markdown("<div class='main-title'>🌿 Digital Twin Millet Disease System</div>", unsafe_allow_html=True)
-st.success("✔ AI + Digital Twin Active")
+st.set_page_config(layout="wide")
 
 # ===============================
-# SIDEBAR
+# TITLE
 # ===============================
-st.sidebar.title("🌾 Navigation")
-page = st.sidebar.radio("Go to", ["Home", "Analysis", "About"])
+st.markdown("<h1 style='text-align:center; color:#77dd77;'>🌿 Digital Twin Millet System</h1>", unsafe_allow_html=True)
 
 # ===============================
-# LOAD CLASS NAMES
+# LOAD DATA
 # ===============================
-try:
-    class_names = np.load("class_names.npy", allow_pickle=True)
-    clean_names = [name.replace("_", " ").title() for name in class_names]
-except:
-    clean_names = ["Disease A", "Disease B", "Healthy"]
+class_names = np.load("class_names.npy", allow_pickle=True)
+clean_names = [n.replace("_", " ").title() for n in class_names]
 
 # ===============================
-# MODEL LOADING (FIXED)
+# MODEL
 # ===============================
 @st.cache_resource
-def load_my_model():
+def load_model():
     from tensorflow.keras.models import load_model as keras_load_model
-    from tensorflow.keras.applications import MobileNetV2
-    from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
-    from tensorflow.keras.models import Model
-
     try:
-        # Try loading full model
         return keras_load_model("fixed_model.h5", compile=False)
     except:
-        # Fallback: rebuild model + load weights
-        base = MobileNetV2(weights=None, include_top=False, input_shape=(224,224,3))
-        x = GlobalAveragePooling2D()(base.output)
-        x = Dense(128, activation="relu")(x)
-        out = Dense(len(clean_names), activation="softmax")(x)
-
-        model = Model(base.input, out)
+        base = tf.keras.applications.MobileNetV2(weights=None, include_top=False, input_shape=(224,224,3))
+        x = tf.keras.layers.GlobalAveragePooling2D()(base.output)
+        x = tf.keras.layers.Dense(128, activation="relu")(x)
+        out = tf.keras.layers.Dense(len(clean_names), activation="softmax")(x)
+        model = tf.keras.Model(base.input, out)
         model.load_weights("fixed_model.h5")
         return model
 
-model = load_my_model()
+model = load_model()
 
 # ===============================
 # PREPROCESS
 # ===============================
 def preprocess(img):
     img = img.resize((224,224))
-    img = np.array(img)
-    img = np.expand_dims(img, axis=0)
-    return preprocess_input(img)
+    arr = np.array(img)
+    arr = np.expand_dims(arr, axis=0)
+    return preprocess_input(arr)
+
+# ===============================
+# TABS (APP UI)
+# ===============================
+tab1, tab2, tab3 = st.tabs(["🏠 Home", "📊 Analysis", "📄 Report"])
 
 # ===============================
 # HOME
 # ===============================
-if page == "Home":
-    st.header("🌐 Digital Twin Overview")
-    st.write("""
-    This system integrates Deep Learning with Digital Twin technology 
-    to simulate crop conditions and predict disease severity in millets.
-    """)
+with tab1:
+    st.subheader("🌐 Digital Twin Overview")
+    st.write("System for disease detection and severity prediction using Digital Twin concept.")
 
 # ===============================
 # ANALYSIS
 # ===============================
-if page == "Analysis":
-
-    st.header("🔍 AI + Digital Twin Dashboard")
-
-    uploaded = st.file_uploader("📤 Upload Millet Leaf Image", type=["jpg","png","jpeg"])
+with tab2:
+    uploaded = st.file_uploader("Upload Leaf Image", type=["jpg","png","jpeg"])
 
     col1, col2, col3 = st.columns(3)
-    temp = col1.slider("🌡 Temperature (°C)", 10,50,25)
-    humidity = col2.slider("💧 Humidity (%)",10,100,50)
-    soil = col3.slider("🌱 Soil Moisture (%)",10,100,50)
+    temp = col1.slider("Temperature", 10,50,25)
+    humidity = col2.slider("Humidity",10,100,50)
+    soil = col3.slider("Soil Moisture",10,100,50)
 
     if uploaded:
-        img = Image.open(uploaded).convert("RGB")
-
-        c1, c2 = st.columns([1,2])
-
-        with c1:
-            st.image(img, caption="Uploaded Image")
+        img = Image.open(uploaded)
+        st.image(img, width=250)
 
         pred = model.predict(preprocess(img))
         idx = np.argmax(pred)
         confidence = float(np.max(pred))
         disease = clean_names[idx]
 
-        # ===============================
-        # 🎯 METRICS
-        # ===============================
-        with c2:
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Confidence", f"{confidence*100:.2f}%")
-            m2.metric("Disease", disease)
-            m3.metric("Severity", "High" if confidence > 0.7 else "Moderate")
+        st.metric("Disease", disease)
+        st.metric("Confidence", f"{confidence*100:.2f}%")
 
-        st.markdown("---")
+        # Plotly chart
+        fig = px.bar(
+            x=clean_names,
+            y=pred[0],
+            title="Prediction Probabilities"
+        )
+        st.plotly_chart(fig)
 
-        # ===============================
-        # DIGITAL TWIN
-        # ===============================
-        st.subheader("🧬 Digital Twin Simulation")
+# ===============================
+# REPORT (Explainable Panel)
+# ===============================
+with tab3:
+    st.subheader("🧠 Explainable Report")
 
-        severity_index = (confidence*70)+(temp/50*10)+(humidity/100*10)+(soil/100*10)
-        severity_index = min(severity_index,100)
+    if "confidence" in locals():
+        st.write(f"Detected Disease: **{disease}**")
+        st.write(f"Confidence: **{confidence*100:.2f}%**")
 
-        if severity_index > 70:
+        severity = (confidence*70)+(temp/50*10)+(humidity/100*10)+(soil/100*10)
+
+        if severity > 70:
             level = "High"
-        elif severity_index > 40:
+        elif severity > 40:
             level = "Moderate"
         else:
             level = "Low"
 
-        st.progress(int(severity_index))
-        st.write(f"Severity Index: {severity_index:.2f}%")
-        st.write(f"Level: **{level}**")
+        st.write(f"Severity Level: **{level}**")
 
-        st.markdown("---")
-
-        # ===============================
-        # CHARTS
-        # ===============================
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.subheader("📊 Class Probabilities")
-            fig, ax = plt.subplots()
-            ax.barh(clean_names, pred[0])
-            st.pyplot(fig)
-
-        with col2:
-            st.subheader("🥇 Top Predictions")
-            top_indices = np.argsort(pred[0])[-3:][::-1]
-            top_classes = [clean_names[i] for i in top_indices]
-            top_values = [pred[0][i] for i in top_indices]
-
-            fig2, ax2 = plt.subplots()
-            ax2.pie(top_values, labels=top_classes, autopct='%1.1f%%')
-            st.pyplot(fig2)
-
-        st.markdown("---")
-
-        # ===============================
-        # DECISION SUPPORT
-        # ===============================
-        st.subheader("🧠 Decision Support")
-
-        st.info(f"""
-        Disease: {disease}  
-        Severity: {level}  
-        Recommended Actions:
-        - Apply fungicide
-        - Monitor environment
-        - Improve irrigation
+        st.info("""
+        The system analyzes leaf patterns and environmental conditions 
+        to predict disease severity and provide recommendations.
         """)
 
 # ===============================
-# ABOUT
+# ADMIN PANEL
 # ===============================
-if page == "About":
-    st.title("📄 About Project")
-    st.write("""
-    AI + Digital Twin system for millet disease prediction.
-    """)
+if st.session_state.role == "admin":
+    st.sidebar.success("Admin Mode")
+    st.sidebar.write("Additional controls can be added here")
+else:
+    st.sidebar.info("User Mode")
