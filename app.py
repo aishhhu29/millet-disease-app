@@ -38,15 +38,26 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ===============================
-# 🎨 UI
+# 🎨 UI STYLE
 # ===============================
 st.markdown("""
 <style>
+body {
+    background-color: #0f172a;
+}
 .main-title {
     text-align:center;
-    font-size:36px;
+    font-size:40px;
     color:#77dd77;
     font-weight:bold;
+    margin-bottom:20px;
+}
+.card {
+    background: #111827;
+    padding:20px;
+    border-radius:15px;
+    border:1px solid #2d3748;
+    margin-top:10px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -89,31 +100,23 @@ disease_info = {
 class_names = np.load("class_names.npy", allow_pickle=True)
 
 # ===============================
-# 🔥 FINAL MODEL LOADER (FIXED)
+# MODEL (FIXED)
 # ===============================
 @st.cache_resource
 def load_model():
-
     from tensorflow.keras.models import load_model
-
     try:
-        # TRY NORMAL LOAD
         return load_model("fixed_model.h5", compile=False)
-
-    except Exception as e:
-        # FALLBACK (SAFE METHOD)
+    except:
         base = tf.keras.applications.MobileNetV2(
             weights=None,
             include_top=False,
             input_shape=(224,224,3)
         )
-
         x = tf.keras.layers.GlobalAveragePooling2D()(base.output)
         x = tf.keras.layers.Dense(128, activation="relu")(x)
         out = tf.keras.layers.Dense(len(class_names), activation="softmax")(x)
-
         model = tf.keras.Model(base.input, out)
-
         model.load_weights("fixed_model.h5")
         return model
 
@@ -165,9 +168,7 @@ def generate_heatmap(img):
     heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
 
     overlay = heatmap*0.4 + img_np
-    overlay = np.clip(overlay, 0, 255).astype(np.uint8)
-
-    return overlay
+    return np.clip(overlay, 0, 255).astype(np.uint8)
 
 # ===============================
 # TABS
@@ -178,7 +179,7 @@ tab1, tab2, tab3 = st.tabs(["🏠 Home", "📊 Analysis", "📄 Report"])
 # HOME
 # ===============================
 with tab1:
-    st.write("🌾 Digital Twin system for millet disease detection.")
+    st.write("🌾 Digital Twin system for millet disease detection and crop management.")
 
 # ===============================
 # ANALYSIS
@@ -195,7 +196,14 @@ with tab2:
 
     if uploaded:
         img = Image.open(uploaded)
-        st.image(img, width=250)
+
+        left, right = st.columns([1,2])
+
+        with left:
+            st.image(img, use_container_width=True)
+            if st.button("🔥 Show Heatmap"):
+                st.image(generate_heatmap(img))
+                st.info("Highlighted regions show infected areas.")
 
         pred = model.predict(preprocess(img))
         idx = np.argmax(pred)
@@ -206,21 +214,27 @@ with tab2:
 
         st.session_state.history.append((display, confidence))
 
-        st.metric("🌱 Detected Disease", display)
-        st.metric("📊 Confidence", f"{confidence*100:.2f}%")
+        with right:
+            st.markdown(f"""
+            <div class="card">
+                <h2 style="color:#77dd77;">🌱 {display}</h2>
+                <h3 style="color:#4fc3f7;">📊 {confidence*100:.2f}%</h3>
+            </div>
+            """, unsafe_allow_html=True)
 
-        if st.button("🔥 Show Heatmap"):
-            st.image(generate_heatmap(img))
-            st.info("Model focus regions highlighted.")
+            st.markdown("### 🧠 Diagnosis & Recommendation")
 
-        st.markdown("### 🧠 Diagnosis")
+            if disease in disease_info:
+                info = disease_info[disease]
 
-        if disease in disease_info:
-            info = disease_info[disease]
-            st.write(f"📌 {info['desc']}")
-            st.write(f"⚠ {info['cause']}")
-            st.write(f"💊 {info['treatment']}")
-            st.write(f"🌾 {info['fertilizer']}")
+                st.markdown(f"""
+                <div class="card">
+                    <p><b>📌 Description:</b> {info['desc']}</p>
+                    <p><b>⚠ Cause:</b> {info['cause']}</p>
+                    <p><b>💊 Treatment:</b> {info['treatment']}</p>
+                    <p><b>🌾 Fertilizer:</b> {info['fertilizer']}</p>
+                </div>
+                """, unsafe_allow_html=True)
 
 # ===============================
 # REPORT
@@ -234,9 +248,23 @@ with tab3:
         st.metric("🌱 Last Disease", d)
         st.metric("📊 Confidence", f"{c*100:.2f}%")
 
+        diseases = [h[0] for h in st.session_state.history]
+        confidences = [h[1]*100 for h in st.session_state.history]
+
+        st.plotly_chart(px.line(x=list(range(len(diseases))), y=confidences, markers=True),
+                        use_container_width=True)
+
         st.markdown("### 📋 History")
         for i,(d,c) in enumerate(st.session_state.history):
             st.write(f"{i+1}. {d} — {c*100:.2f}%")
 
     else:
         st.info("No predictions yet.")
+
+# ===============================
+# SIDEBAR
+# ===============================
+if st.session_state.role == "admin":
+    st.sidebar.success("Admin Mode")
+else:
+    st.sidebar.info("User Mode")
