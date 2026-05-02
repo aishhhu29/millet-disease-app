@@ -48,12 +48,6 @@ st.markdown("""
     color:#77dd77;
     font-weight:bold;
 }
-.card {
-    background:white;
-    padding:18px;
-    border-radius:15px;
-    box-shadow:0 4px 10px rgba(0,0,0,0.1);
-}
 @media (max-width:768px){
     .main-title {font-size:24px;}
 }
@@ -97,7 +91,7 @@ def preprocess(img):
     return tf.keras.applications.mobilenet_v2.preprocess_input(arr)
 
 # ===============================
-# HEATMAP (FIXED)
+# 🔥 HEATMAP (FIXED)
 # ===============================
 def generate_heatmap(img):
     img_array = preprocess(img)
@@ -129,10 +123,13 @@ def generate_heatmap(img):
     heatmap = cv2.resize(heatmap, (224,224))
 
     img_np = np.array(img.resize((224,224)))
-    heatmap = np.uint8(255*heatmap)
+    heatmap = np.uint8(255 * heatmap)
     heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
 
-    return heatmap*0.4 + img_np
+    overlay = heatmap*0.4 + img_np
+    overlay = np.clip(overlay, 0, 255).astype(np.uint8)
+
+    return overlay
 
 # ===============================
 # TABS
@@ -156,14 +153,18 @@ with tab1:
     col3.markdown("### 📊 Severity Index")
     col3.write("Prediction + environment")
 
-    st.markdown("---")
-    st.info("👉 Go to Analysis tab to start")
+    st.info("👉 Go to Analysis tab")
 
 # ===============================
 # ANALYSIS
 # ===============================
 with tab2:
     uploaded = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
+
+    col1, col2, col3 = st.columns(3)
+    temp = col1.slider("🌡 Temperature (°C)", 10,50,25)
+    humidity = col2.slider("💧 Humidity (%)",10,100,50)
+    soil = col3.slider("🌱 Soil Moisture (%)",10,100,50)
 
     if uploaded:
         img = Image.open(uploaded)
@@ -178,16 +179,30 @@ with tab2:
         col1, col2, col3 = st.columns(3)
         col1.metric("🌱 Disease", disease)
         col2.metric("📊 Confidence", f"{confidence*100:.2f}%")
-        col3.metric("⚠ Severity", "High" if confidence > 0.7 else "Moderate")
+
+        # SEVERITY
+        severity_index = (confidence*70)+(temp/50*10)+(humidity/100*10)+(soil/100*10)
+        severity_index = min(severity_index,100)
+
+        if severity_index > 70:
+            level = "High"
+        elif severity_index > 40:
+            level = "Moderate"
+        else:
+            level = "Low"
+
+        col3.metric("⚠ Severity", level)
+
+        st.progress(int(severity_index))
 
         st.session_state.history.append((disease, confidence))
 
-        # BAR CHART
+        # BAR
         st.subheader("📊 Probabilities")
         fig = px.bar(x=clean_names, y=pred[0])
         st.plotly_chart(fig)
 
-        # PIE CHART
+        # PIE
         st.subheader("🥇 Top Predictions")
         top = np.argsort(pred[0])[-3:]
         fig2 = px.pie(values=pred[0][top], names=[clean_names[i] for i in top])
@@ -213,7 +228,7 @@ with tab3:
         st.write(h)
 
 # ===============================
-# ADMIN
+# ADMIN PANEL
 # ===============================
 if st.session_state.role == "admin":
     st.sidebar.success("Admin Mode")
