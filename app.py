@@ -54,32 +54,32 @@ st.markdown("""
 st.markdown("<div class='main-title'>🌿 Digital Twin Millet System</div>", unsafe_allow_html=True)
 
 # ===============================
-# 🌾 DISEASE INFO (MATCHED)
+# 🌾 DISEASE INFO
 # ===============================
 disease_info = {
     "finger_smut": {
         "desc": "Fungal disease causing smut balls in finger millet.",
         "cause": "High humidity and infected seeds.",
-        "treatment": "Apply Carbendazim fungicide and use certified seeds.",
-        "fertilizer": "Apply balanced NPK fertilizer and avoid excess nitrogen."
+        "treatment": "Apply Carbendazim fungicide.",
+        "fertilizer": "Use balanced NPK and avoid excess nitrogen."
     },
     "finger_wilt": {
-        "desc": "Wilting due to fungal infection affecting roots.",
-        "cause": "Soil-borne pathogens and poor drainage.",
-        "treatment": "Use Trichoderma bio-control and fungicide.",
-        "fertilizer": "Use organic compost and improve soil aeration."
+        "desc": "Wilting caused by soil fungi.",
+        "cause": "Poor drainage and infected soil.",
+        "treatment": "Use Trichoderma bio-control.",
+        "fertilizer": "Apply organic compost and improve soil aeration."
     },
     "pearl_downy": {
         "desc": "Downy mildew disease in pearl millet.",
-        "cause": "Cool humid climate and fungal spores.",
+        "cause": "Cool humid climate.",
         "treatment": "Apply Metalaxyl fungicide.",
-        "fertilizer": "Apply potassium-rich fertilizer."
+        "fertilizer": "Use potassium-rich fertilizer."
     },
     "pearl_seedling": {
-        "desc": "Seedling stage disease affecting growth.",
-        "cause": "Poor soil and pathogens.",
+        "desc": "Disease affecting early plant growth.",
+        "cause": "Pathogens in soil.",
         "treatment": "Seed treatment with fungicide.",
-        "fertilizer": "Use phosphorus-rich fertilizer for root growth."
+        "fertilizer": "Apply phosphorus-rich fertilizer."
     }
 }
 
@@ -94,16 +94,7 @@ class_names = np.load("class_names.npy", allow_pickle=True)
 @st.cache_resource
 def load_model():
     from tensorflow.keras.models import load_model as keras_load_model
-    try:
-        return keras_load_model("fixed_model.h5", compile=False)
-    except:
-        base = tf.keras.applications.MobileNetV2(weights=None, include_top=False, input_shape=(224,224,3))
-        x = tf.keras.layers.GlobalAveragePooling2D()(base.output)
-        x = tf.keras.layers.Dense(128, activation="relu")(x)
-        out = tf.keras.layers.Dense(len(class_names), activation="softmax")(x)
-        model = tf.keras.Model(base.input, out)
-        model.load_weights("fixed_model.h5")
-        return model
+    return keras_load_model("fixed_model.h5", compile=False)
 
 model = load_model()
 
@@ -177,19 +168,13 @@ with tab2:
     uploaded = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
 
     col1, col2, col3 = st.columns(3)
-    temp = col1.slider("Temperature", 10,50,25)
-    humidity = col2.slider("Humidity",10,100,50)
-    soil = col3.slider("Soil Moisture",10,100,50)
+    temp = col1.slider("🌡 Temperature", 10,50,25)
+    humidity = col2.slider("💧 Humidity",10,100,50)
+    soil = col3.slider("🌱 Soil Moisture",10,100,50)
 
     if uploaded:
         img = Image.open(uploaded)
-
-        left, right = st.columns([1,2])
-
-        with left:
-            st.image(img, use_column_width=True)
-            if st.button("🔥 Show Heatmap"):
-                st.image(generate_heatmap(img))
+        st.image(img, width=250)
 
         pred = model.predict(preprocess(img))
         idx = np.argmax(pred)
@@ -198,52 +183,53 @@ with tab2:
         disease = class_names[idx]
         display_name = disease.replace("_"," ").title()
 
-        # Severity
-        severity_index = (confidence*70)+(temp/50*10)+(humidity/100*10)+(soil/100*10)
-        severity_index = min(severity_index,100)
-
-        if severity_index > 70:
-            level = "High"
-        elif severity_index > 40:
-            level = "Moderate"
-        else:
-            level = "Low"
-
         st.session_state.history.append((display_name, confidence))
 
-        st.markdown("### 📊 Metrics")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Disease", display_name)
-        m2.metric("Confidence", f"{confidence*100:.2f}%")
-        m3.metric("Severity", level)
+        # Metrics
+        st.markdown("### 📊 Key Metrics")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("🌱 Detected Disease", display_name)
+        c2.metric("📊 Confidence", f"{confidence*100:.2f}%")
 
-        st.progress(int(severity_index))
+        # Confidence indicator
+        if confidence > 0.8:
+            st.success("High confidence prediction")
+        elif confidence > 0.5:
+            st.warning("Moderate confidence")
+        else:
+            st.error("Low confidence")
+
+        # Severity
+        severity = (confidence*70)+(temp/50*10)+(humidity/100*10)+(soil/100*10)
+        severity = min(severity,100)
+
+        level = "High" if severity>70 else "Moderate" if severity>40 else "Low"
+        c3.metric("⚠ Severity", level)
+        st.progress(int(severity))
 
         # Charts
         st.plotly_chart(px.bar(x=class_names, y=pred[0]), use_container_width=True)
         top = np.argsort(pred[0])[-3:]
         st.plotly_chart(px.pie(values=pred[0][top], names=[class_names[i] for i in top]), use_container_width=True)
 
-        # ===============================
-        # 🧠 DIAGNOSIS
-        # ===============================
+        # Heatmap
+        if st.button("🔥 Show Heatmap"):
+            st.image(generate_heatmap(img))
+            st.info("Highlighted regions show where the model focused.")
+
+        # Diagnosis
         st.markdown("### 🧠 Diagnosis & Recommendation")
 
         if disease in disease_info:
             info = disease_info[disease]
 
-            st.success(f"Disease: {display_name}")
+            st.success(f"Detected: {display_name}")
 
-            c1, c2 = st.columns(2)
-            with c1:
-                st.write(f"📌 Description: {info['desc']}")
-                st.write(f"⚠ Cause: {info['cause']}")
-            with c2:
-                st.write(f"💊 Treatment: {info['treatment']}")
-                st.write(f"🌾 Fertilizer: {info['fertilizer']}")
-
-        else:
-            st.warning("No data available")
+            col1, col2 = st.columns(2)
+            col1.write(f"📌 {info['desc']}")
+            col1.write(f"⚠ {info['cause']}")
+            col2.write(f"💊 {info['treatment']}")
+            col2.write(f"🌾 {info['fertilizer']}")
 
 # ===============================
 # REPORT
@@ -255,61 +241,40 @@ with tab3:
 
         last_disease, last_conf = st.session_state.history[-1]
 
-        # ===============================
-        # 🧠 SUMMARY
-        # ===============================
-        st.markdown("### 🧠 Latest Diagnosis")
+        st.metric("🌱 Last Disease", last_disease)
+        st.metric("📊 Confidence", f"{last_conf*100:.2f}%")
 
-        col1, col2 = st.columns(2)
-        col1.metric("🌱 Disease", last_disease)
-        col2.metric("📊 Confidence", f"{last_conf*100:.2f}%")
-
-        # ===============================
-        # 🌾 RECOMMENDATION (NEW 🔥)
-        # ===============================
+        # Recommendation again
         key = last_disease.lower().replace(" ", "_")
 
         if key in disease_info:
             info = disease_info[key]
 
             st.markdown("### 🌿 Recommendation")
+            st.write(f"📌 {info['desc']}")
+            st.write(f"⚠ {info['cause']}")
+            st.write(f"💊 {info['treatment']}")
+            st.write(f"🌾 {info['fertilizer']}")
 
-            st.success(f"Detected: {last_disease}")
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.write(f"📌 **Description:** {info['desc']}")
-                st.write(f"⚠ **Cause:** {info['cause']}")
-
-            with col2:
-                st.write(f"💊 **Treatment:** {info['treatment']}")
-                st.write(f"🌾 **Fertilizer:** {info['fertilizer']}")
-
-        # ===============================
-        # 📊 HISTORY CHART (NEW 🔥)
-        # ===============================
-        st.markdown("### 📊 Prediction Trend")
-
+        # Chart
         diseases = [h[0] for h in st.session_state.history]
         confidences = [h[1]*100 for h in st.session_state.history]
 
-        fig = px.line(
-            x=list(range(len(diseases))),
-            y=confidences,
-            markers=True,
-            title="Confidence Over Time"
-        )
+        st.plotly_chart(px.line(x=list(range(len(diseases))), y=confidences, markers=True),
+                        use_container_width=True)
 
-        st.plotly_chart(fig, use_container_width=True)
-
-        # ===============================
-        # 📋 CLEAN HISTORY (FIXED)
-        # ===============================
-        st.markdown("### 📋 Prediction History")
-
-        for i, (d, c) in enumerate(st.session_state.history):
-            st.write(f"🔹 {i+1}. **{d}** — {c*100:.2f}%")
+        # Clean history
+        st.markdown("### 📋 History")
+        for i,(d,c) in enumerate(st.session_state.history):
+            st.write(f"{i+1}. {d} — {c*100:.2f}%")
 
     else:
-        st.info("No predictions yet. Go to Analysis tab.")
+        st.info("No predictions yet.")
+
+# ===============================
+# SIDEBAR
+# ===============================
+if st.session_state.role == "admin":
+    st.sidebar.success("Admin Mode")
+else:
+    st.sidebar.info("User Mode")
