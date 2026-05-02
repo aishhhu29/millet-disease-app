@@ -7,7 +7,7 @@ import hashlib
 import cv2
 
 # ===============================
-# 🔐 LOGIN SYSTEM
+# 🔐 LOGIN
 # ===============================
 def hash_pass(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -38,7 +38,7 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ===============================
-# 🎨 STYLE
+# 🎨 UI
 # ===============================
 st.markdown("""
 <style>
@@ -48,16 +48,37 @@ st.markdown("""
     color:#77dd77;
     font-weight:bold;
 }
-@media (max-width:768px){
-    .main-title {font-size:24px;}
-}
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown("<div class='main-title'>🌿 Digital Twin Millet System</div>", unsafe_allow_html=True)
 
 # ===============================
-# LOAD CLASS NAMES
+# 🌾 DISEASE + FERTILIZER INFO
+# ===============================
+disease_info = {
+    "Blast": {
+        "desc": "Fungal disease causing leaf lesions.",
+        "cause": "High humidity and moderate temperature.",
+        "treatment": "Apply Tricyclazole fungicide.",
+        "fertilizer": "Avoid excess nitrogen; apply balanced NPK (10:10:10)."
+    },
+    "Leaf Spot": {
+        "desc": "Brown spots on leaves.",
+        "cause": "Moist conditions and poor airflow.",
+        "treatment": "Apply Mancozeb spray.",
+        "fertilizer": "Use potassium-rich fertilizer to improve resistance."
+    },
+    "Healthy": {
+        "desc": "No disease detected.",
+        "cause": "Healthy crop condition.",
+        "treatment": "No treatment needed.",
+        "fertilizer": "Maintain regular organic compost and balanced nutrients."
+    }
+}
+
+# ===============================
+# LOAD CLASSES
 # ===============================
 class_names = np.load("class_names.npy", allow_pickle=True)
 clean_names = [i.replace("_"," ").title() for i in class_names]
@@ -91,7 +112,7 @@ def preprocess(img):
     return tf.keras.applications.mobilenet_v2.preprocess_input(arr)
 
 # ===============================
-# 🔥 HEATMAP (FIXED)
+# 🔥 HEATMAP
 # ===============================
 def generate_heatmap(img):
     img_array = preprocess(img)
@@ -140,31 +161,18 @@ tab1, tab2, tab3 = st.tabs(["🏠 Home", "📊 Analysis", "📄 Report"])
 # HOME
 # ===============================
 with tab1:
-    st.markdown("## 🌐 System Overview")
-
-    col1, col2, col3 = st.columns(3)
-
-    col1.markdown("### 🌱 Disease Detection")
-    col1.write("Image-based classification")
-
-    col2.markdown("### 🌡 Environment Simulation")
-    col2.write("Digital Twin modeling")
-
-    col3.markdown("### 📊 Severity Index")
-    col3.write("Prediction + environment")
-
-    st.info("👉 Go to Analysis tab")
+    st.write("🌾 Digital Twin system for millet disease detection and crop management.")
 
 # ===============================
 # ANALYSIS
 # ===============================
 with tab2:
-    uploaded = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
+    uploaded = st.file_uploader("Upload Image")
 
     col1, col2, col3 = st.columns(3)
-    temp = col1.slider("🌡 Temperature (°C)", 10,50,25)
-    humidity = col2.slider("💧 Humidity (%)",10,100,50)
-    soil = col3.slider("🌱 Soil Moisture (%)",10,100,50)
+    temp = col1.slider("Temperature", 10,50,25)
+    humidity = col2.slider("Humidity",10,100,50)
+    soil = col3.slider("Soil Moisture",10,100,50)
 
     if uploaded:
         img = Image.open(uploaded)
@@ -175,12 +183,7 @@ with tab2:
         confidence = float(np.max(pred))
         disease = clean_names[idx]
 
-        # METRICS
-        col1, col2, col3 = st.columns(3)
-        col1.metric("🌱 Disease", disease)
-        col2.metric("📊 Confidence", f"{confidence*100:.2f}%")
-
-        # SEVERITY
+        # Severity
         severity_index = (confidence*70)+(temp/50*10)+(humidity/100*10)+(soil/100*10)
         severity_index = min(severity_index,100)
 
@@ -191,46 +194,44 @@ with tab2:
         else:
             level = "Low"
 
-        col3.metric("⚠ Severity", level)
+        # Metrics
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Disease", disease)
+        col2.metric("Confidence", f"{confidence*100:.2f}%")
+        col3.metric("Severity", level)
 
         st.progress(int(severity_index))
 
         st.session_state.history.append((disease, confidence))
 
-        # BAR
-        st.subheader("📊 Probabilities")
-        fig = px.bar(x=clean_names, y=pred[0])
-        st.plotly_chart(fig)
-
-        # PIE
-        st.subheader("🥇 Top Predictions")
+        # Charts
+        st.plotly_chart(px.bar(x=clean_names, y=pred[0]))
         top = np.argsort(pred[0])[-3:]
-        fig2 = px.pie(values=pred[0][top], names=[clean_names[i] for i in top])
-        st.plotly_chart(fig2)
+        st.plotly_chart(px.pie(values=pred[0][top], names=[clean_names[i] for i in top]))
 
-        # HEATMAP
+        # Heatmap
         if st.button("🔥 Show Heatmap"):
             st.image(generate_heatmap(img))
+
+        # ===============================
+        # 🧠 EXPLANATION + FERTILIZER
+        # ===============================
+        st.markdown("### 🧠 Diagnosis & Recommendation")
+
+        if disease in disease_info:
+            info = disease_info[disease]
+
+            st.success(f"Disease: {disease}")
+            st.write(f"📌 Description: {info['desc']}")
+            st.write(f"⚠ Cause: {info['cause']}")
+            st.write(f"💊 Treatment: {info['treatment']}")
+            st.write(f"🌾 Fertilizer Recommendation: {info['fertilizer']}")
 
 # ===============================
 # REPORT
 # ===============================
 with tab3:
-    st.subheader("🧠 Explainable Report")
+    st.subheader("Prediction History")
 
-    if st.session_state.history:
-        last = st.session_state.history[-1]
-        st.write(f"Disease: {last[0]}")
-        st.write(f"Confidence: {last[1]*100:.2f}%")
-
-    st.subheader("📊 History")
     for h in st.session_state.history:
         st.write(h)
-
-# ===============================
-# ADMIN PANEL
-# ===============================
-if st.session_state.role == "admin":
-    st.sidebar.success("Admin Mode")
-else:
-    st.sidebar.info("User Mode")
