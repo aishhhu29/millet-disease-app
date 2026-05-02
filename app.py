@@ -1,3 +1,239 @@
+import streamlit as st
+import tensorflow as tf
+import numpy as np
+from PIL import Image
+import plotly.express as px
+import hashlib
+import cv2
+
+# ===============================
+# 🔐 LOGIN
+# ===============================
+def hash_pass(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+users = {
+    "admin": {"password": hash_pass("admin123"), "role": "admin"},
+    "user": {"password": hash_pass("user123"), "role": "user"}
+}
+
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.history = []
+
+def login():
+    st.markdown("<h2 style='text-align:center;'>🔐 Login</h2>", unsafe_allow_html=True)
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        if u in users and users[u]["password"] == hash_pass(p):
+            st.session_state.logged_in = True
+            st.session_state.role = users[u]["role"]
+        else:
+            st.error("Invalid credentials")
+
+if not st.session_state.logged_in:
+    login()
+    st.stop()
+
+# ===============================
+# 🎨 UI STYLE
+# ===============================
+st.markdown("""
+<style>
+.main-title {
+    text-align:center;
+    font-size:36px;
+    color:#77dd77;
+    font-weight:bold;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("<div class='main-title'>🌿 Digital Twin Millet System</div>", unsafe_allow_html=True)
+
+# ===============================
+# 🌾 DISEASE INFO
+# ===============================
+disease_info = {
+    "finger_smut": {
+        "desc": "Fungal disease causing smut balls in finger millet.",
+        "cause": "High humidity and infected seeds.",
+        "treatment": "Apply Carbendazim fungicide.",
+        "fertilizer": "Use balanced NPK and avoid excess nitrogen."
+    },
+    "finger_wilt": {
+        "desc": "Wilting caused by soil fungi.",
+        "cause": "Poor drainage and infected soil.",
+        "treatment": "Use Trichoderma bio-control.",
+        "fertilizer": "Apply organic compost and improve soil aeration."
+    },
+    "pearl_downy": {
+        "desc": "Downy mildew disease in pearl millet.",
+        "cause": "Cool humid climate.",
+        "treatment": "Apply Metalaxyl fungicide.",
+        "fertilizer": "Use potassium-rich fertilizer."
+    },
+    "pearl_seedling": {
+        "desc": "Disease affecting early plant growth.",
+        "cause": "Pathogens in soil.",
+        "treatment": "Seed treatment with fungicide.",
+        "fertilizer": "Apply phosphorus-rich fertilizer."
+    }
+}
+
+# ===============================
+# LOAD CLASS NAMES
+# ===============================
+class_names = np.load("class_names.npy", allow_pickle=True)
+
+# ===============================
+# MODEL
+# ===============================
+@st.cache_resource
+def load_model():
+    from tensorflow.keras.models import load_model as keras_load_model
+    return keras_load_model("fixed_model.h5", compile=False)
+
+model = load_model()
+
+# ===============================
+# PREPROCESS
+# ===============================
+def preprocess(img):
+    img = img.resize((224,224))
+    arr = np.array(img)
+    arr = np.expand_dims(arr, axis=0)
+    return tf.keras.applications.mobilenet_v2.preprocess_input(arr)
+
+# ===============================
+# 🔥 HEATMAP
+# ===============================
+def generate_heatmap(img):
+    img_array = preprocess(img)
+
+    last_conv = None
+    for layer in reversed(model.layers):
+        if "conv" in layer.name:
+            last_conv = layer.name
+            break
+
+    grad_model = tf.keras.models.Model(
+        [model.inputs],
+        [model.get_layer(last_conv).output, model.output]
+    )
+
+    with tf.GradientTape() as tape:
+        conv, preds = grad_model(img_array)
+        loss = preds[:, tf.argmax(preds[0])]
+
+    grads = tape.gradient(loss, conv)
+    pooled = tf.reduce_mean(grads, axis=(0,1,2))
+
+    conv = conv[0]
+    heatmap = conv @ pooled[..., tf.newaxis]
+    heatmap = tf.squeeze(heatmap)
+
+    heatmap = heatmap.numpy() if hasattr(heatmap, "numpy") else heatmap
+    heatmap = np.maximum(heatmap, 0) / (np.max(heatmap) + 1e-8)
+    heatmap = cv2.resize(heatmap, (224,224))
+
+    img_np = np.array(img.resize((224,224)))
+    heatmap = np.uint8(255 * heatmap)
+    heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+
+    overlay = heatmap*0.4 + img_np
+    overlay = np.clip(overlay, 0, 255).astype(np.uint8)
+
+    return overlay
+
+# ===============================
+# TABS
+# ===============================
+tab1, tab2, tab3 = st.tabs(["🏠 Home", "📊 Analysis", "📄 Report"])
+
+# ===============================
+# HOME
+# ===============================
+with tab1:
+    st.write("🌾 Digital Twin system for millet disease detection and crop management.")
+
+# ===============================
+# ANALYSIS
+# ===============================
+with tab2:
+    st.markdown("## 🔍 Analysis Dashboard")
+
+    uploaded = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
+
+    col1, col2, col3 = st.columns(3)
+    temp = col1.slider("🌡 Temperature", 10,50,25)
+    humidity = col2.slider("💧 Humidity",10,100,50)
+    soil = col3.slider("🌱 Soil Moisture",10,100,50)
+
+    if uploaded:
+        img = Image.open(uploaded)
+        st.image(img, width=250)
+
+        pred = model.predict(preprocess(img))
+        idx = np.argmax(pred)
+        confidence = float(np.max(pred))
+
+        disease = class_names[idx]
+        display_name = disease.replace("_"," ").title()
+
+        st.session_state.history.append((display_name, confidence))
+
+        # Metrics
+        st.markdown("### 📊 Key Metrics")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("🌱 Detected Disease", display_name)
+        c2.metric("📊 Confidence", f"{confidence*100:.2f}%")
+
+        # Confidence indicator
+        if confidence > 0.8:
+            st.success("High confidence prediction")
+        elif confidence > 0.5:
+            st.warning("Moderate confidence")
+        else:
+            st.error("Low confidence")
+
+        # Severity
+        severity = (confidence*70)+(temp/50*10)+(humidity/100*10)+(soil/100*10)
+        severity = min(severity,100)
+
+        level = "High" if severity>70 else "Moderate" if severity>40 else "Low"
+        c3.metric("⚠ Severity", level)
+        st.progress(int(severity))
+
+        # Charts
+        st.plotly_chart(px.bar(x=class_names, y=pred[0]), use_container_width=True)
+        top = np.argsort(pred[0])[-3:]
+        st.plotly_chart(px.pie(values=pred[0][top], names=[class_names[i] for i in top]), use_container_width=True)
+
+        # Heatmap
+        if st.button("🔥 Show Heatmap"):
+            st.image(generate_heatmap(img))
+            st.info("Highlighted regions show where the model focused.")
+
+        # Diagnosis
+        st.markdown("### 🧠 Diagnosis & Recommendation")
+
+        if disease in disease_info:
+            info = disease_info[disease]
+
+            st.success(f"Detected: {display_name}")
+
+            col1, col2 = st.columns(2)
+            col1.write(f"📌 {info['desc']}")
+            col1.write(f"⚠ {info['cause']}")
+            col2.write(f"💊 {info['treatment']}")
+            col2.write(f"🌾 {info['fertilizer']}")
+
+# ===============================
+# REPORT
+# ===============================
 with tab3:
     st.markdown("## 📄 Smart Report")
 
@@ -5,61 +241,40 @@ with tab3:
 
         last_disease, last_conf = st.session_state.history[-1]
 
-        # ===============================
-        # 🧠 SUMMARY
-        # ===============================
-        st.markdown("### 🧠 Latest Diagnosis")
+        st.metric("🌱 Last Disease", last_disease)
+        st.metric("📊 Confidence", f"{last_conf*100:.2f}%")
 
-        col1, col2 = st.columns(2)
-        col1.metric("🌱 Disease", last_disease)
-        col2.metric("📊 Confidence", f"{last_conf*100:.2f}%")
-
-        # ===============================
-        # 🌾 RECOMMENDATION (NEW 🔥)
-        # ===============================
+        # Recommendation again
         key = last_disease.lower().replace(" ", "_")
 
         if key in disease_info:
             info = disease_info[key]
 
             st.markdown("### 🌿 Recommendation")
+            st.write(f"📌 {info['desc']}")
+            st.write(f"⚠ {info['cause']}")
+            st.write(f"💊 {info['treatment']}")
+            st.write(f"🌾 {info['fertilizer']}")
 
-            st.success(f"Detected: {last_disease}")
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.write(f"📌 **Description:** {info['desc']}")
-                st.write(f"⚠ **Cause:** {info['cause']}")
-
-            with col2:
-                st.write(f"💊 **Treatment:** {info['treatment']}")
-                st.write(f"🌾 **Fertilizer:** {info['fertilizer']}")
-
-        # ===============================
-        # 📊 HISTORY CHART (NEW 🔥)
-        # ===============================
-        st.markdown("### 📊 Prediction Trend")
-
+        # Chart
         diseases = [h[0] for h in st.session_state.history]
         confidences = [h[1]*100 for h in st.session_state.history]
 
-        fig = px.line(
-            x=list(range(len(diseases))),
-            y=confidences,
-            markers=True,
-            title="Confidence Over Time"
-        )
+        st.plotly_chart(px.line(x=list(range(len(diseases))), y=confidences, markers=True),
+                        use_container_width=True)
 
-        st.plotly_chart(fig, use_container_width=True)
-
-        # ===============================
-        # 📋 CLEAN HISTORY (FIXED)
-        # ===============================
-        st.markdown("### 📋 Prediction History")
-
-        for i, (d, c) in enumerate(st.session_state.history):
-            st.write(f"🔹 {i+1}. **{d}** — {c*100:.2f}%")
+        # Clean history
+        st.markdown("### 📋 History")
+        for i,(d,c) in enumerate(st.session_state.history):
+            st.write(f"{i+1}. {d} — {c*100:.2f}%")
 
     else:
-        st.info("No predictions yet. Go to Analysis tab.")
+        st.info("No predictions yet.")
+
+# ===============================
+# SIDEBAR
+# ===============================
+if st.session_state.role == "admin":
+    st.sidebar.success("Admin Mode")
+else:
+    st.sidebar.info("User Mode")
