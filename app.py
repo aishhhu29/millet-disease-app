@@ -3,29 +3,33 @@ import tensorflow as tf
 import numpy as np
 from PIL import Image
 import plotly.express as px
-from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+import hashlib
+import cv2
 
 # ===============================
-# LOGIN SYSTEM
+# 🔐 SECURE LOGIN (HASHED)
 # ===============================
+def hash_pass(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
 users = {
-    "admin": {"password": "admin123", "role": "admin"},
-    "user": {"password": "user123", "role": "user"}
+    "admin": {"password": hash_pass("admin123"), "role": "admin"},
+    "user": {"password": hash_pass("user123"), "role": "user"}
 }
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+    st.session_state.history = []
 
 def login():
-    st.title("🔐 Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    st.markdown("<h2 style='text-align:center;'>🔐 Login</h2>", unsafe_allow_html=True)
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
 
     if st.button("Login"):
-        if username in users and users[username]["password"] == password:
+        if u in users and users[u]["password"] == hash_pass(p):
             st.session_state.logged_in = True
-            st.session_state.role = users[username]["role"]
-            st.success("Login successful")
+            st.session_state.role = users[u]["role"]
         else:
             st.error("Invalid credentials")
 
@@ -34,23 +38,35 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ===============================
-# PAGE CONFIG
+# 🎨 UI STYLE
 # ===============================
-st.set_page_config(layout="wide")
+st.markdown("""
+<style>
+.main-title {
+    text-align:center;
+    font-size:38px;
+    color:#77dd77;
+    font-weight:bold;
+}
+.card {
+    background:white;
+    padding:20px;
+    border-radius:15px;
+    box-shadow:0 4px 10px rgba(0,0,0,0.1);
+}
+</style>
+""", unsafe_allow_html=True)
 
-# ===============================
-# TITLE
-# ===============================
-st.markdown("<h1 style='text-align:center; color:#77dd77;'>🌿 Digital Twin Millet System</h1>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🌿 Digital Twin Millet System</div>", unsafe_allow_html=True)
 
 # ===============================
 # LOAD DATA
 # ===============================
 class_names = np.load("class_names.npy", allow_pickle=True)
-clean_names = [n.replace("_", " ").title() for n in class_names]
+clean_names = [i.replace("_"," ").title() for i in class_names]
 
 # ===============================
-# MODEL
+# MODEL LOAD
 # ===============================
 @st.cache_resource
 def load_model():
@@ -75,30 +91,55 @@ def preprocess(img):
     img = img.resize((224,224))
     arr = np.array(img)
     arr = np.expand_dims(arr, axis=0)
-    return preprocess_input(arr)
+    return tf.keras.applications.mobilenet_v2.preprocess_input(arr)
 
 # ===============================
-# TABS (APP UI)
+# HEATMAP
+# ===============================
+def heatmap(img):
+    img_array = preprocess(img)
+
+    last_conv = None
+    for layer in reversed(model.layers):
+        if "conv" in layer.name:
+            last_conv = layer.name
+            break
+
+    grad_model = tf.keras.models.Model(
+        [model.inputs],
+        [model.get_layer(last_conv).output, model.output]
+    )
+
+    with tf.GradientTape() as tape:
+        conv, preds = grad_model(img_array)
+        loss = preds[:, tf.argmax(preds[0])]
+
+    grads = tape.gradient(loss, conv)
+    pooled = tf.reduce_mean(grads, axis=(0,1,2))
+
+    conv = conv[0]
+    heatmap = conv @ pooled[..., tf.newaxis]
+    heatmap = tf.squeeze(heatmap)
+
+    heatmap = np.maximum(heatmap, 0) / np.max(heatmap)
+    heatmap = cv2.resize(heatmap.numpy(), (224,224))
+
+    img_np = np.array(img.resize((224,224)))
+    heatmap = np.uint8(255*heatmap)
+    heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+
+    return heatmap*0.4 + img_np
+
+# ===============================
+# TABS
 # ===============================
 tab1, tab2, tab3 = st.tabs(["🏠 Home", "📊 Analysis", "📄 Report"])
-
-# ===============================
-# HOME
-# ===============================
-with tab1:
-    st.subheader("🌐 Digital Twin Overview")
-    st.write("System for disease detection and severity prediction using Digital Twin concept.")
 
 # ===============================
 # ANALYSIS
 # ===============================
 with tab2:
-    uploaded = st.file_uploader("Upload Leaf Image", type=["jpg","png","jpeg"])
-
-    col1, col2, col3 = st.columns(3)
-    temp = col1.slider("Temperature", 10,50,25)
-    humidity = col2.slider("Humidity",10,100,50)
-    soil = col3.slider("Soil Moisture",10,100,50)
+    uploaded = st.file_uploader("Upload Image")
 
     if uploaded:
         img = Image.open(uploaded)
@@ -112,45 +153,44 @@ with tab2:
         st.metric("Disease", disease)
         st.metric("Confidence", f"{confidence*100:.2f}%")
 
-        # Plotly chart
-        fig = px.bar(
-            x=clean_names,
-            y=pred[0],
-            title="Prediction Probabilities"
-        )
+        # SAVE HISTORY
+        st.session_state.history.append((disease, confidence))
+
+        # BAR CHART
+        st.subheader("📊 Probability Distribution")
+        fig = px.bar(x=clean_names, y=pred[0])
         st.plotly_chart(fig)
 
+        # PIE CHART
+        st.subheader("🥇 Top Predictions")
+        top = np.argsort(pred[0])[-3:]
+        fig2 = px.pie(values=pred[0][top], names=[clean_names[i] for i in top])
+        st.plotly_chart(fig2)
+
+        # HEATMAP
+        if st.button("🔥 Show Heatmap"):
+            st.image(heatmap(img))
+
 # ===============================
-# REPORT (Explainable Panel)
+# REPORT
 # ===============================
 with tab3:
     st.subheader("🧠 Explainable Report")
 
-    if "confidence" in locals():
-        st.write(f"Detected Disease: **{disease}**")
-        st.write(f"Confidence: **{confidence*100:.2f}%**")
+    if st.session_state.history:
+        last = st.session_state.history[-1]
+        st.write(f"Latest Prediction: {last[0]}")
+        st.write(f"Confidence: {last[1]*100:.2f}%")
 
-        severity = (confidence*70)+(temp/50*10)+(humidity/100*10)+(soil/100*10)
+        st.info("The system integrates image analysis with environmental modeling.")
 
-        if severity > 70:
-            level = "High"
-        elif severity > 40:
-            level = "Moderate"
-        else:
-            level = "Low"
-
-        st.write(f"Severity Level: **{level}**")
-
-        st.info("""
-        The system analyzes leaf patterns and environmental conditions 
-        to predict disease severity and provide recommendations.
-        """)
+    st.subheader("📊 History")
+    for h in st.session_state.history:
+        st.write(h)
 
 # ===============================
 # ADMIN PANEL
 # ===============================
 if st.session_state.role == "admin":
     st.sidebar.success("Admin Mode")
-    st.sidebar.write("Additional controls can be added here")
-else:
-    st.sidebar.info("User Mode")
+    st.sidebar.write("You can extend controls here")
