@@ -1,242 +1,65 @@
-import streamlit as st
-import tensorflow as tf
-import numpy as np
-from PIL import Image
-import plotly.express as px
-import hashlib
-import cv2
-
-# ===============================
-# 🔐 LOGIN
-# ===============================
-def hash_pass(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-users = {
-    "admin": {"password": hash_pass("admin123"), "role": "admin"},
-    "user": {"password": hash_pass("user123"), "role": "user"}
-}
-
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-    st.session_state.history = []
-
-def login():
-    st.markdown("<h2 style='text-align:center;'>🔐 Login</h2>", unsafe_allow_html=True)
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        if u in users and users[u]["password"] == hash_pass(p):
-            st.session_state.logged_in = True
-            st.session_state.role = users[u]["role"]
-        else:
-            st.error("Invalid credentials")
-
-if not st.session_state.logged_in:
-    login()
-    st.stop()
-
-# ===============================
-# 🎨 UI
-# ===============================
-st.markdown("""
-<style>
-.main-title {
-    text-align:center;
-    font-size:36px;
-    color:#77dd77;
-    font-weight:bold;
-}
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown("<div class='main-title'>🌿 Digital Twin Millet System</div>", unsafe_allow_html=True)
-
-# ===============================
-# 🌾 DISEASE INFO
-# ===============================
-disease_info = {
-    "finger_smut": {
-        "desc": "Fungal disease causing smut balls.",
-        "cause": "Humidity and infected seeds.",
-        "treatment": "Apply Carbendazim fungicide.",
-        "fertilizer": "Balanced NPK fertilizer."
-    },
-    "finger_wilt": {
-        "desc": "Wilting due to fungal infection.",
-        "cause": "Soil pathogens.",
-        "treatment": "Use Trichoderma.",
-        "fertilizer": "Organic compost."
-    },
-    "pearl_downy": {
-        "desc": "Downy mildew disease.",
-        "cause": "Cool humid conditions.",
-        "treatment": "Apply Metalaxyl.",
-        "fertilizer": "Potassium-rich fertilizer."
-    },
-    "pearl_seedling": {
-        "desc": "Seedling disease.",
-        "cause": "Soil pathogens.",
-        "treatment": "Seed treatment.",
-        "fertilizer": "Phosphorus-rich fertilizer."
-    }
-}
-
-# ===============================
-# LOAD CLASS NAMES
-# ===============================
-class_names = np.load("class_names.npy", allow_pickle=True)
-
-# ===============================
-# 🔥 FINAL MODEL LOADER (FIXED)
-# ===============================
-@st.cache_resource
-def load_model():
-
-    from tensorflow.keras.models import load_model
-
-    try:
-        # TRY NORMAL LOAD
-        return load_model("fixed_model.h5", compile=False)
-
-    except Exception as e:
-        # FALLBACK (SAFE METHOD)
-        base = tf.keras.applications.MobileNetV2(
-            weights=None,
-            include_top=False,
-            input_shape=(224,224,3)
-        )
-
-        x = tf.keras.layers.GlobalAveragePooling2D()(base.output)
-        x = tf.keras.layers.Dense(128, activation="relu")(x)
-        out = tf.keras.layers.Dense(len(class_names), activation="softmax")(x)
-
-        model = tf.keras.Model(base.input, out)
-
-        model.load_weights("fixed_model.h5")
-        return model
-
-model = load_model()
-
-# ===============================
-# PREPROCESS
-# ===============================
-def preprocess(img):
-    img = img.resize((224,224))
-    arr = np.array(img)
-    arr = np.expand_dims(arr, axis=0)
-    return tf.keras.applications.mobilenet_v2.preprocess_input(arr)
-
-# ===============================
-# HEATMAP
-# ===============================
-def generate_heatmap(img):
-    img_array = preprocess(img)
-
-    last_conv = None
-    for layer in reversed(model.layers):
-        if "conv" in layer.name:
-            last_conv = layer.name
-            break
-
-    grad_model = tf.keras.models.Model(
-        [model.inputs],
-        [model.get_layer(last_conv).output, model.output]
-    )
-
-    with tf.GradientTape() as tape:
-        conv, preds = grad_model(img_array)
-        loss = preds[:, tf.argmax(preds[0])]
-
-    grads = tape.gradient(loss, conv)
-    pooled = tf.reduce_mean(grads, axis=(0,1,2))
-
-    conv = conv[0]
-    heatmap = conv @ pooled[..., tf.newaxis]
-    heatmap = tf.squeeze(heatmap)
-
-    heatmap = heatmap.numpy()
-    heatmap = np.maximum(heatmap, 0) / (np.max(heatmap) + 1e-8)
-    heatmap = cv2.resize(heatmap, (224,224))
-
-    img_np = np.array(img.resize((224,224)))
-    heatmap = np.uint8(255 * heatmap)
-    heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-
-    overlay = heatmap*0.4 + img_np
-    overlay = np.clip(overlay, 0, 255).astype(np.uint8)
-
-    return overlay
-
-# ===============================
-# TABS
-# ===============================
-tab1, tab2, tab3 = st.tabs(["🏠 Home", "📊 Analysis", "📄 Report"])
-
-# ===============================
-# HOME
-# ===============================
-with tab1:
-    st.write("🌾 Digital Twin system for millet disease detection.")
-
-# ===============================
-# ANALYSIS
-# ===============================
-with tab2:
-    st.markdown("## 🔍 Analysis Dashboard")
-
-    uploaded = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
-
-    col1, col2, col3 = st.columns(3)
-    temp = col1.slider("🌡 Temperature", 10,50,25)
-    humidity = col2.slider("💧 Humidity",10,100,50)
-    soil = col3.slider("🌱 Soil Moisture",10,100,50)
-
-    if uploaded:
-        img = Image.open(uploaded)
-        st.image(img, width=250)
-
-        pred = model.predict(preprocess(img))
-        idx = np.argmax(pred)
-        confidence = float(np.max(pred))
-
-        disease = class_names[idx]
-        display = disease.replace("_"," ").title()
-
-        st.session_state.history.append((display, confidence))
-
-        st.metric("🌱 Detected Disease", display)
-        st.metric("📊 Confidence", f"{confidence*100:.2f}%")
-
-        if st.button("🔥 Show Heatmap"):
-            st.image(generate_heatmap(img))
-            st.info("Model focus regions highlighted.")
-
-        st.markdown("### 🧠 Diagnosis")
-
-        if disease in disease_info:
-            info = disease_info[disease]
-            st.write(f"📌 {info['desc']}")
-            st.write(f"⚠ {info['cause']}")
-            st.write(f"💊 {info['treatment']}")
-            st.write(f"🌾 {info['fertilizer']}")
-
-# ===============================
-# REPORT
-# ===============================
 with tab3:
     st.markdown("## 📄 Smart Report")
 
     if st.session_state.history:
-        d,c = st.session_state.history[-1]
 
-        st.metric("🌱 Last Disease", d)
-        st.metric("📊 Confidence", f"{c*100:.2f}%")
+        last_disease, last_conf = st.session_state.history[-1]
 
-        st.markdown("### 📋 History")
-        for i,(d,c) in enumerate(st.session_state.history):
-            st.write(f"{i+1}. {d} — {c*100:.2f}%")
+        # ===============================
+        # 🧠 SUMMARY
+        # ===============================
+        st.markdown("### 🧠 Latest Diagnosis")
+
+        col1, col2 = st.columns(2)
+        col1.metric("🌱 Disease", last_disease)
+        col2.metric("📊 Confidence", f"{last_conf*100:.2f}%")
+
+        # ===============================
+        # 🌾 RECOMMENDATION (NEW 🔥)
+        # ===============================
+        key = last_disease.lower().replace(" ", "_")
+
+        if key in disease_info:
+            info = disease_info[key]
+
+            st.markdown("### 🌿 Recommendation")
+
+            st.success(f"Detected: {last_disease}")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.write(f"📌 **Description:** {info['desc']}")
+                st.write(f"⚠ **Cause:** {info['cause']}")
+
+            with col2:
+                st.write(f"💊 **Treatment:** {info['treatment']}")
+                st.write(f"🌾 **Fertilizer:** {info['fertilizer']}")
+
+        # ===============================
+        # 📊 HISTORY CHART (NEW 🔥)
+        # ===============================
+        st.markdown("### 📊 Prediction Trend")
+
+        diseases = [h[0] for h in st.session_state.history]
+        confidences = [h[1]*100 for h in st.session_state.history]
+
+        fig = px.line(
+            x=list(range(len(diseases))),
+            y=confidences,
+            markers=True,
+            title="Confidence Over Time"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # ===============================
+        # 📋 CLEAN HISTORY (FIXED)
+        # ===============================
+        st.markdown("### 📋 Prediction History")
+
+        for i, (d, c) in enumerate(st.session_state.history):
+            st.write(f"🔹 {i+1}. **{d}** — {c*100:.2f}%")
 
     else:
-        st.info("No predictions yet.")
+        st.info("No predictions yet. Go to Analysis tab.")
